@@ -1,1 +1,1 @@
-from repositories.book import Book as BookRepository
+from app.repositories.book import BookRepository

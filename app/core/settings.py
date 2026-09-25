@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "LIBRARY CATALOG"
     APP_ALLOWED_ORIGINS: list[str] = ["*"]
     APP_ALLOWED_HOSTS: list[str] = ["*"]
+    APP_VERSION: str = "1.0.0"
     DOCS_URL: str | None = None
     REDOC_URL: str | None = None
     CORS_ORIGINS: list[str] = ["*"]
@@ -38,6 +39,7 @@ class Settings(BaseSettings):
     DB_NAME: str = "library_catalog"
     DB_HOST: str = "localhost"
     DB_PORT: int = 5432
+    DB_POOL_SIZE: int = 20
 
     # Open library
     OPENLIBRARY_BASE_URL: str = "https://openlibrary.org"

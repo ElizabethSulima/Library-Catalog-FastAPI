@@ -3,14 +3,14 @@ from typing import Sequence
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import models
-from repositories.common import Base as BaseRepository
+from app.models.book import Book
+from app.repositories.common import Base as BaseRepository
 
 
-class BookRepository(BaseRepository[models.Book]):
+class BookRepository(BaseRepository[Book]):
     def __init__(self, session: AsyncSession):
         super().__init__(session)
-        self.model = models.Book
+        self.model = Book
 
     async def find_by_filters(
         self,
@@ -21,9 +21,9 @@ class BookRepository(BaseRepository[models.Book]):
         available: bool | None = None,
         limit: int = 20,
         offset: int = 0,
-    ) -> Sequence[models.Book]:
+    ) -> Sequence[Book]:
         """Поиск книг с фильтрацией"""
-        
+
         stmt = sa.select(self.model)
 
         if title:
@@ -46,7 +46,7 @@ class BookRepository(BaseRepository[models.Book]):
         result = await self.session.scalars(stmt)
         return result.unique().all()
 
-    async def find_by_isbn(self, isbn: str) -> models.Book | None:
+    async def find_by_isbn(self, isbn: str) -> Book | None:
         """Найти книгу по ISBN"""
         stmt = sa.select(self.model).where(self.model.isbn == isbn)
         result = await self.session.scalar(stmt)

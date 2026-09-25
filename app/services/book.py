@@ -1,17 +1,137 @@
-from typing import Sequence
+import logging
+from datetime import datetime
+from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from app.domain.exceptions import (
+    BookAlreadyExistsException,
+    BookNotFoundException,
+    InvalidPagesException,
+    InvalidYearException,
+    OpenLibraryException,
+)
+from app.domain.mappers.book_mapper import BookMapper
+from app.external.openlibrary.client import OpenLibraryClient
+from app.repositories.book import BookRepository
+from app.schemas.book import BookCreate, BookResponse, BookUpdate
 
-import models
-from repositories import BookRepository
+logger = logging.getLogger(__name__)
 
 
 class BookService:
-    def __init__(self, session: AsyncSession):
-        self.session = session
-        self.repository = BookRepository(self.session)
+    """
+    Сервис для работы с книгами.
 
-    async def get_books(
+    Содержит всю бизнес-логику приложения.
+    """
+
+    def __init__(
+        self,
+        book_repository: BookRepository,
+        openlibrary_client: OpenLibraryClient,
+    ):
+        self.book_repo = book_repository
+        self.ol_client = openlibrary_client
+
+    async def create_book(self, book_data: BookCreate) -> BookResponse:
+        """
+        Создать новую книгу с обогащением из Open Library.
+
+        Бизнес-правила:
+        - Год не в будущем
+        - Страницы > 0
+        - ISBN уникален (если указан)
+
+        Args:
+            book_data: Данные для создания
+
+        Returns:
+            ShowBook: Созданная книга
+
+        Raises:
+            InvalidYearException: Если год невалиден
+            InvalidPagesException: Если страницы <= 0
+            BookAlreadyExistsException: Если ISBN уже существует
+        """
+        # 1. Валидация бизнес-правил
+        self._validate_year(book_data.year)
+        self._validate_pages(book_data.pages)
+        # self._validate_book_data(book_data)
+
+        # 2. Проверка уникальности ISBN
+        if book_data.isbn:
+            existing = await self.book_repo.find_by_isbn(book_data.isbn)
+            if existing:
+                raise BookAlreadyExistsException(book_data.isbn)
+
+        # 3. Обогащение данных из Open Library
+        extra = await self._enrich_book_data(book_data)
+
+        # 4. Создание в БД
+        book = await self.book_repo.create(
+            title=book_data.title,
+            author=book_data.author,
+            year=book_data.year,
+            genre=book_data.genre,
+            pages=book_data.pages,
+            isbn=book_data.isbn,
+            description=book_data.description,
+            extra=extra,
+        )
+
+        # 5. Маппинг в DTO
+        return BookMapper.to_show_book(book)
+
+    async def get_book(self, book_id: UUID) -> BookResponse:
+        """
+        Получить книгу по ID.
+
+        Raises:
+            BookNotFoundException: Если книга не найдена
+        """
+        book = await self.book_repo.get_by_id(book_id)
+        if book is None:
+            raise BookNotFoundException(book_id)
+
+        return BookMapper.to_show_book(book)
+
+    async def update_book(
+        self,
+        book_id: UUID,
+        book_data: BookUpdate,
+    ) -> BookResponse:
+        """
+        Обновить книгу.
+
+        Обновляются только переданные поля.
+        """
+        # Проверить существование
+        existing = await self.book_repo.get_by_id(book_id)
+        if existing is None:
+            raise BookNotFoundException(book_id)
+
+        # Валидация если обновляется год/страницы
+        if book_data.year is not None:
+            self._validate_year(book_data.year)
+        if book_data.pages is not None:
+            self._validate_pages(book_data.pages)
+
+        update_payload = book_data.model_dump(exclude_unset=True)
+
+        updated = await self.book_repo.update(book_id, **update_payload)
+        return BookMapper.to_show_book(updated)
+
+    async def delete_book(self, book_id: UUID) -> None:
+        """
+        Удалить книгу.
+
+        Raises:
+            BookNotFoundException: Если книга не найдена
+        """
+        deleted = await self.book_repo.delete(book_id)
+        if not deleted:
+            raise BookNotFoundException(book_id=book_id)
+
+    async def search_books(
         self,
         title: str | None = None,
         author: str | None = None,
@@ -20,10 +140,15 @@ class BookService:
         available: bool | None = None,
         limit: int = 20,
         offset: int = 0,
-    ) -> Sequence[models.Book]:
-        """Получить список книг с фильтрацией"""
+    ) -> tuple[list[BookResponse], int]:
+        """
+        Поиск книг с фильтрацией и пагинацией.
 
-        return await self.repository.find_by_filters(
+        Returns:
+            tuple: (список книг, общее количество)
+        """
+        # Получить книги
+        books = await self.book_repo.find_by_filters(
             title=title,
             author=author,
             genre=genre,
@@ -33,42 +158,48 @@ class BookService:
             offset=offset,
         )
 
-    async def get_book_by_id(self, book_id: int) -> models.Book | None:
-        """Получить книгу по ID"""
-        return await self.repository.get_item_id(book_id)
-
-    async def get_book_by_isbn(self, isbn: str) -> models.Book | None:
-        """Получить книгу по ISBN"""
-        return await self.repository.find_by_isbn(isbn)
-
-    async def create_book(self, data: dict) -> models.Book:
-        """Создать новую книгу"""
-        return await self.repository.create_item(data)
-
-    async def update_book(
-        self, book_id: int, data: dict
-    ) -> models.Book | None:
-        """Обновить книгу"""
-        data["id"] = book_id
-        return await self.repository.update_item(data)
-
-    async def delete_book(self, book_id: int) -> None:
-        """Удалить книгу"""
-        await self.repository.delete_item(book_id)
-
-    async def count_by_filters(
-        self,
-        title: str | None = None,
-        author: str | None = None,
-        genre: str | None = None,
-        year: int | None = None,
-        available: bool | None = None,
-    ) -> int:
-        """Подсчитать количество книг по фильтрам"""
-        return await self.repository.count_by_filters(
+        # Подсчитать общее количество
+        total = await self.book_repo.count_by_filters(
             title=title,
             author=author,
             genre=genre,
             year=year,
             available=available,
         )
+
+        return BookMapper.to_show_books(books), total
+
+    # ========== ПРИВАТНЫЕ МЕТОДЫ ==========
+
+    def _validate_year(self, year: int) -> None:
+        """Проверить что год валиден."""
+
+        current_year = datetime.now().year
+        if year < 1000 or year > current_year:
+            raise InvalidYearException(year)
+
+    def _validate_pages(self, pages: int) -> None:
+        """Проверить что количество страниц валидно."""
+        if pages <= 0:
+            raise InvalidPagesException(pages)
+
+    async def _enrich_book_data(self, book_data: BookCreate) -> dict | None:
+        """
+        Обогатить данные книги из Open Library.
+
+        Не выбрасывает исключение если API недоступен.
+        """
+        try:
+            extra = await self.ol_client.enrich(
+                title=book_data.title,
+                author=book_data.author,
+                isbn=book_data.isbn,
+            )
+            return extra if extra else None
+        except OpenLibraryException as e:
+            logger.warning(
+                "Failed to enrich book data from Open Library: %s",
+                e,
+                extra={"title": book_data.title, "author": book_data.author},
+            )
+            return None
