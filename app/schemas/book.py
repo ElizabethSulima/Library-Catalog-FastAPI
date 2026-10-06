@@ -20,9 +20,7 @@ class BookCreate(BookBase):
 
     isbn: str | None = Field(None, min_length=10, max_length=20)
     description: str | None = Field(None, max_length=5000)
-    extra: dict[str, Any] | None = Field(
-        None, description="Дополнительные метаданные"
-    )
+    extra: dict[str, Any] | None = Field(None, description="Дополнительные метаданные")
 
     @field_validator("isbn", mode="before")
     @classmethod
@@ -35,9 +33,7 @@ class BookCreate(BookBase):
 
         # Проверка: только цифры (и 'X' для ISBN-10)
         if not clean.replace("X", "").isdigit():
-            raise ValueError(
-                "ISBN должен содержать только цифры и, возможно, 'X' на конце"
-            )
+            raise ValueError("ISBN должен содержать только цифры и, возможно, 'X' на конце")
 
         # Проверка длины
         if len(clean) not in (10, 13):
@@ -90,7 +86,7 @@ class BookResponse(BookBase):
     available: bool
     isbn: str | None
     description: str | None
-    extra: dict | None
+    extra: dict[str, Any] | None
     created_at: datetime
     updated_at: datetime
 
@@ -133,10 +129,6 @@ class BookFilters(BaseModel):
         max_length=100,
         description="Поиск по автору (частичное совпадение)",
     )
-    genre: str | None = Field(
-        None, max_length=100, description="Точное совпадение жанра"
-    )
-    year: int | None = Field(
-        None, ge=1000, le=2100, description="Точное совпадение года"
-    )
+    genre: str | None = Field(None, max_length=100, description="Точное совпадение жанра")
+    year: int | None = Field(None, ge=1000, le=2100, description="Точное совпадение года")
     available: bool | None = Field(None, description="Фильтр по доступности")

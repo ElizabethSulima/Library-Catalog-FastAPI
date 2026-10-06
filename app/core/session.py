@@ -1,4 +1,5 @@
-from typing import Annotated, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Annotated
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import (
@@ -10,7 +11,7 @@ from sqlalchemy.ext.asyncio import (
 from app.core.settings import settings
 
 engine = create_async_engine(
-    settings.dsn,
+    settings.database_url,
     pool_size=settings.DB_POOL_SIZE,
     echo=settings.DEBUG,
 )
@@ -23,9 +24,16 @@ async_session_maker = async_sessionmaker(
 
 
 async def get_async_session() -> AsyncIterator[AsyncSession]:
+    """
+    Dependency для получения async сессии.
+
+    Автоматически коммитит транзакцию при успешном завершении запроса.
+    Откатывает при исключении.
+    """
     async with async_session_maker() as session:
         try:
             yield session
+            await session.commit()
         except Exception:
             await session.rollback()
             raise
@@ -42,4 +50,4 @@ async def dispose_engine() -> None:
     await engine.dispose()
 
 
-AsyncSessionDepency = Annotated[AsyncSession, Depends(get_async_session)]
+AsyncSessionDependency = Annotated[AsyncSession, Depends(get_async_session)]

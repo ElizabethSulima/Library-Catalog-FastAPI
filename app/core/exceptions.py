@@ -2,7 +2,7 @@ from typing import Any
 from uuid import UUID
 
 import fastapi as fa
-from fastapi.responses import JSONResponse
+from starlette.responses import JSONResponse
 
 
 class AppException(Exception):
@@ -30,11 +30,7 @@ class AppException(Exception):
         """
         name = self.__class__.__name__
         snake = "".join(
-            (
-                f"_{c}"
-                if c.isupper() and i > 0 and not name[i - 1].isupper()
-                else c
-            )
+            (f"_{c}" if c.isupper() and i > 0 and not name[i - 1].isupper() else c)
             for i, c in enumerate(name)
         )
         return snake.upper()
@@ -69,9 +65,16 @@ class NotFoundException(AppException):
 def register_exception_handlers(app: fa.FastAPI) -> None:
     """Зарегистрировать обработчики исключений."""
 
-    @app.exception_handler(AppException)
-    async def app_exception_handler(request: fa.Request, exc: AppException):
+    @app.exception_handler(AppException)  # type: ignore[misc]
+    async def app_exception_handler(request: fa.Request, exc: AppException) -> JSONResponse:
+        content: dict[str, Any] = {
+            "detail": exc.message,
+            "error_code": exc.error_code,
+        }
+        if exc.details:
+            content["details"] = exc.details
+
         return JSONResponse(
             status_code=exc.status_code,
-            content={"detail": exc.message},
+            content=content,
         )

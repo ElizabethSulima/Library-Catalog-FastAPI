@@ -1,8 +1,7 @@
-from typing import Type, TypeVar
+from typing import TypeVar
 
-from app.models.base import Base
-from app.models.book import Book
+from app.models.base import BaseModel
 
-MODEL = TypeVar("MODEL", bound=Base)
+MODEL = TypeVar("MODEL", bound=BaseModel)
 
-TypeModel = Type[MODEL]
+TypeModel = type[MODEL]

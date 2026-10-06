@@ -1,17 +1,14 @@
 import asyncio
-import sys
+import os
 from logging.config import fileConfig
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from alembic import context  # type: ignore[attr-defined]
 from app.core.settings import settings
-from app.models import Base, Book
+from app.models.base import BaseModel
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -22,12 +19,19 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", settings.dsn)
+
+database_url = os.getenv("DATABASE_URL")
+if not database_url:
+    raise ValueError("DATABASE_URL не найден в переменных окружения!")
+config.set_main_option("sqlalchemy.url", str(settings.database_url))
+
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
 # add your model's MetaData object here
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-target_metadata = Base.metadata
+target_metadata = BaseModel.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -53,8 +57,8 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        compare_type=True,
     )
+
     with context.begin_transaction():
         context.run_migrations()
 

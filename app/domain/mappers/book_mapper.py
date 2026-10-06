@@ -8,13 +8,13 @@ class BookMapper:
     @staticmethod
     def to_show_book(book: Book) -> BookResponse:
         """
-        Преобразовать Book ORM модель в ShowBook DTO.
+        Преобразовать Book ORM модель в BookResponse DTO.
 
         Args:
             book: ORM модель из БД
 
         Returns:
-            ShowBook: Pydantic модель для API
+            BookResponse: Pydantic модель для API
         """
         return BookResponse(
             book_id=book.book_id,

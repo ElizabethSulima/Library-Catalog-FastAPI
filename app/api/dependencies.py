@@ -1,10 +1,8 @@
-from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, cast
 
-from fastapi import Depends
+from fastapi import Depends, Request
 
-from app.core.dependency import AsyncSessionDepency
-from app.core.settings import settings
+from app.core.session import AsyncSessionDependency
 from app.external.openlibrary.client import OpenLibraryClient
 from app.repositories.book import BookRepository
 from app.services.book import BookService
@@ -12,24 +10,18 @@ from app.services.book import BookService
 # ========== EXTERNAL CLIENTS (Singletons) ==========
 
 
-@lru_cache
-def get_openlibrary_client() -> OpenLibraryClient:
+def get_openlibrary_client(request: Request) -> OpenLibraryClient:
     """
-    Получить singleton OpenLibraryClient.
-
-    lru_cache создает клиент один раз и переиспользует.
+    Зависимость для получения экземпляра OpenLibraryClient
     """
-    return OpenLibraryClient(
-        base_url=settings.OPENLIBRARY_BASE_URL,
-        timeout=settings.OPENLIBRARY_TIMEOUT,
-    )
+    return cast(OpenLibraryClient, request.app.state.ol_client)
 
 
 # ========== REPOSITORIES ==========
 
 
 async def get_book_repository(
-    db: AsyncSessionDepency,
+    db: AsyncSessionDependency,
 ) -> BookRepository:
     """
     Создать BookRepository для текущей сессии БД.
@@ -50,7 +42,7 @@ async def get_book_service(
     Создать BookService с внедренными зависимостями.
 
     FastAPI автоматически разрешит все зависимости:
-    1. get_db() создаст AsyncSession
+    1. get_async_session() создаст AsyncSession
     2. get_book_repository() создаст BookRepository с session
     3. get_openlibrary_client() вернет singleton клиент
     4. Все внедрится в BookService
@@ -63,8 +55,5 @@ async def get_book_service(
 
 # ========== TYPE ALIASES ДЛЯ УДОБСТВА ==========
 
-# Можно использовать в роутерах так:
-# async def my_route(service: BookServiceDep):
 BookServiceDep = Annotated[BookService, Depends(get_book_service)]
 BookRepoDep = Annotated[BookRepository, Depends(get_book_repository)]
-DbSessionDep = AsyncSessionDepency
