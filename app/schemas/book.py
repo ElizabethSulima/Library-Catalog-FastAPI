@@ -2,7 +2,13 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class BookBase(BaseModel):
@@ -77,6 +83,19 @@ class BookUpdate(BaseModel):
     isbn: str | None = None
     description: str | None = Field(None, max_length=5000)
     extra: dict[str, Any] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_explicit_nulls(cls, data: Any) -> Any:
+        """
+        Запрещаем явную передачу null для любых полей.
+        Это гарантирует возврат 422 вместо 500.
+        """
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if value is None:
+                    raise ValueError(f"Field '{key}' cannot be explicitly set to null")
+        return data
 
 
 class BookResponse(BookBase):

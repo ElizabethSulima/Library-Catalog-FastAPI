@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from abc import ABC, abstractmethod
+from abc import ABC
 from types import TracebackType
 from typing import Any, cast
 
@@ -18,6 +18,8 @@ class BaseApiClient(ABC):
     - Timeout management
     """
 
+    client_name: str
+
     def __init__(
         self,
         base_url: str,
@@ -30,11 +32,7 @@ class BaseApiClient(ABC):
         self.retries = retries
         self.backoff = backoff
         self._client = httpx.AsyncClient(timeout=self.timeout)
-        self.logger = logging.getLogger(self.client_name())
-
-    @abstractmethod
-    def client_name(self) -> str:
-        """Имя клиента для логирования"""
+        self.logger = logging.getLogger(self.client_name)
 
     def _build_url(self, path: str) -> str:
         """Построить полный URL."""

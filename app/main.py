@@ -26,8 +26,6 @@ from app.external.openlibrary.client import OpenLibraryClient
 setup_logging()
 logger = logging.getLogger(__name__)
 
-limiter: Limiter = Limiter(key_func=get_remote_address, default_limits=["100 per minute"])
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -97,46 +95,56 @@ async def rate_limit_exceeded_handler(request: Request, exc: Exception) -> JSONR
     )
 
 
-app = FastAPI(
-    title=settings.APP_NAME,
-    version=settings.APP_VERSION,
-    docs_url=settings.docs_url if not settings.is_production else None,
-    redoc_url=settings.redoc_url if not settings.is_production else None,
-    openapi_url=settings.openapi_url if not settings.is_production else None,
-    description="REST API для управления библиотечным каталогом",
-    lifespan=lifespan,
-)
+def create_app() -> FastAPI:
+    """
+    Фабрика для создания экземпляра приложения.
+    Необходима для корректной работы тестов (dependency_overrides).
+    """
+    limiter: Limiter = Limiter(key_func=get_remote_address, default_limits=["100 per minute"])
 
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+    app = FastAPI(
+        title=settings.APP_NAME,
+        version=settings.APP_VERSION,
+        docs_url=settings.docs_url if not settings.is_production else None,
+        redoc_url=settings.redoc_url if not settings.is_production else None,
+        openapi_url=(settings.openapi_url if not settings.is_production else None),
+        description="REST API для управления библиотечным каталогом",
+        lifespan=lifespan,
+    )
 
-setup_middleware(app)
-register_exception_handlers(app)
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
-app.include_router(
-    books.router,
-    prefix=settings.API_V1_PREFIX,
-)
-app.include_router(
-    health.router,
-    prefix=settings.API_V1_PREFIX,
-)
+    setup_middleware(app)
+    register_exception_handlers(app)
+
+    app.include_router(
+        books.router,
+        prefix=settings.API_V1_PREFIX,
+    )
+    app.include_router(
+        health.router,
+        prefix=settings.API_V1_PREFIX,
+    )
+
+    @app.get("/")
+    @limiter.limit("200 per minute")
+    async def root(request: Request) -> dict[str, str | None]:
+        """Корневой эндпоинт."""
+        response: dict[str, str | None] = {
+            "message": "Welcome to Library Catalog API",
+            "version": settings.APP_VERSION,
+        }
+        if not settings.is_production:
+            response["docs"] = "/docs"
+        return response
+
+    return app
 
 
-@app.get("/")  # type: ignore[misc]
-@limiter.limit("200 per minute")  # type: ignore[misc]
-async def root(request: Request) -> dict[str, str | None]:
-    """Корневой эндпоинт."""
-    response: dict[str, str | None] = {
-        "message": "Welcome to Library Catalog API",
-        "version": settings.APP_VERSION,
-    }
-    if not settings.is_production:
-        response["docs"] = "/docs"
-    return response
-
+app_fast = create_app()
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app_fast, host="0.0.0.0", port=8000)

@@ -12,8 +12,14 @@ from app.domain.exceptions import (
 )
 from app.domain.mappers.book_mapper import BookMapper
 from app.external.openlibrary.client import OpenLibraryClient
+from app.models.book import Book
 from app.repositories.book import BookRepository
-from app.schemas.book import BookCreate, BookResponse, BookUpdate
+from app.schemas.book import (
+    BookCreate,
+    BookResponse,
+    BookUpdate,
+)
+from app.schemas.pagination import PaginatedResponse, PaginationParams
 
 logger = logging.getLogger(__name__)
 
@@ -35,52 +41,33 @@ class BookService:
 
     async def create_book(self, book_data: BookCreate) -> BookResponse:
         """
-        Создать новую книгу с обогащением из Open Library.
-
-        Бизнес-правила:
-        - Год не в будущем
-        - Страницы > 0
-        - ISBN уникален (если указан)
-
-        Args:
-            book_data: Данные для создания
-
-        Returns:
-            BookResponse: Созданная книга
-
-        Raises:
-            InvalidYearException: Если год невалиден
-            InvalidPagesException: Если страницы <= 0
-            BookAlreadyExistsException: Если ISBN уже существует
+        Создать новую книгу с обогащением из Open Library
         """
-        self._validate_year(book_data.year)
-        self._validate_pages(book_data.pages)
-
         if book_data.isbn:
             existing = await self.book_repo.find_by_isbn(book_data.isbn)
             if existing:
                 raise BookAlreadyExistsException(book_data.isbn)
 
+        self._validate_year(book_data.year)
+        self._validate_pages(book_data.pages)
+
         extra = await self._enrich_book_data(book_data)
-        data = {
-            "title": book_data.title,
-            "author": book_data.author,
-            "year": book_data.year,
-            "genre": book_data.genre,
-            "pages": book_data.pages,
-            "isbn": book_data.isbn,
-            "description": book_data.description,
-            "extra": extra,
-        }
-        book = await self.book_repo.create(data)
-        return BookMapper.to_show_book(book)
+        data = Book(
+            title=book_data.title,
+            author=book_data.author,
+            year=book_data.year,
+            genre=book_data.genre,
+            pages=book_data.pages,
+            isbn=book_data.isbn,
+            description=book_data.description,
+            extra=extra,
+        )
+        created_book = await self.book_repo.create(data)
+        return BookMapper.to_show_book(created_book)
 
     async def get_book(self, book_id: UUID) -> BookResponse:
         """
-        Получить книгу по ID.
-
-        Raises:
-            BookNotFoundException: Если книга не найдена
+        Получить книгу по ID
         """
         book = await self.book_repo.get_by_id(book_id)
         if book is None:
@@ -98,10 +85,6 @@ class BookService:
 
         Обновляются только переданные поля.
         """
-        existing = await self.book_repo.get_by_id(book_id)
-        if existing is None:
-            raise BookNotFoundException(book_id)
-
         if book_data.year is not None:
             self._validate_year(book_data.year)
         if book_data.pages is not None:
@@ -129,23 +112,21 @@ class BookService:
         genre: str | None = None,
         year: int | None = None,
         available: bool | None = None,
-        limit: int = 20,
-        offset: int = 0,
-    ) -> tuple[list[BookResponse], int]:
+        page: int = 1,
+        page_size: int = 20,
+    ) -> PaginatedResponse[BookResponse]:
         """
         Поиск книг с фильтрацией и пагинацией.
-
-        Returns:
-            tuple: (список книг, общее количество)
         """
+        pagination = PaginationParams(page=page, page_size=page_size)
         books = await self.book_repo.find_by_filters(
             title=title,
             author=author,
             genre=genre,
             year=year,
             available=available,
-            limit=limit,
-            offset=offset,
+            limit=pagination.limit,
+            offset=pagination.offset,
         )
         total = await self.book_repo.count_by_filters(
             title=title,
@@ -154,10 +135,13 @@ class BookService:
             year=year,
             available=available,
         )
+        mapped_books = BookMapper.to_show_books(books)
 
-        return BookMapper.to_show_books(books), total
-
-    # ========== ПРИВАТНЫЕ МЕТОДЫ ==========
+        return PaginatedResponse.create(
+            items=mapped_books,
+            total=total,
+            pagination=pagination,
+        )
 
     def _validate_year(self, year: int) -> None:
         """Проверить что год валиден."""

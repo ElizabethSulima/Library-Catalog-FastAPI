@@ -10,7 +10,7 @@ from app.schemas.pagination import PaginatedResponse, PaginationParams
 router = APIRouter(prefix="/books", tags=["Books"])
 
 
-@router.post(  # type: ignore[misc]
+@router.post(
     "/",
     response_model=BookResponse,
     status_code=status.HTTP_201_CREATED,
@@ -21,20 +21,12 @@ async def create_book(
     service: BookServiceDep,
 ) -> BookResponse:
     """
-    Создать новую книгу.
-
-    Автоматически обогащает данные из Open Library API:
-    - Обложка книги
-    - Темы/subjects
-    - Издатель
-    - Рейтинг
-
-    Если Open Library недоступен, книга все равно будет создана.
+    Создать новую книгу
     """
     return await service.create_book(book_data)
 
 
-@router.get(  # type: ignore[misc]
+@router.get(
     "/",
     response_model=PaginatedResponse[BookResponse],
     summary="Получить список книг",
@@ -47,20 +39,18 @@ async def get_books(
     """
     Получить список книг с фильтрацией
     """
-    books, total = await service.search_books(
+    return await service.search_books(
         title=filters.title,
         author=filters.author,
         genre=filters.genre,
         year=filters.year,
         available=filters.available,
-        limit=pagination.limit,
-        offset=pagination.offset,
+        page=pagination.page,
+        page_size=pagination.page_size,
     )
 
-    return PaginatedResponse.create(books, total, pagination)
 
-
-@router.get(  # type: ignore[misc]
+@router.get(
     "/{book_id}",
     response_model=BookResponse,
     summary="Получить информацию о книге по id",
@@ -70,18 +60,12 @@ async def get_book(
     service: BookServiceDep,
 ) -> BookResponse:
     """
-    Получить книгу по ID.
-
-    Returns:
-        BookResponse: Полная информация о книге
-
-    Raises:
-        404: Книга не найдена
+    Получить книгу по ID
     """
     return await service.get_book(book_id)
 
 
-@router.patch(  # type: ignore[misc]
+@router.patch(
     "/{book_id}",
     response_model=BookResponse,
     summary="Обновить книгу",
@@ -94,12 +78,6 @@ async def update_book(
     """
     Обновить книгу.
 
-    Передаются только те поля, которые нужно изменить.
-    Остальные поля остаются без изменений.
-
-    Returns:
-        BookResponse: Обновленная книга
-
     Raises:
         404: Книга не найдена
         422: Невалидные данные
@@ -107,7 +85,7 @@ async def update_book(
     return await service.update_book(book_id, book_data)
 
 
-@router.delete(  # type: ignore[misc]
+@router.delete(
     "/{book_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Удалить книгу",

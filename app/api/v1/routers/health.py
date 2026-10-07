@@ -15,7 +15,7 @@ router = APIRouter(prefix="/health", tags=["Health"])
 START_TIME = datetime.now(UTC)
 
 
-@router.get(  # type: ignore[misc]
+@router.get(
     "/live",
     response_model=LivenessResponse,
     summary="Liveness Check",
@@ -37,7 +37,7 @@ async def liveness_check() -> LivenessResponse:
     )
 
 
-@router.get(  # type: ignore[misc]
+@router.get(
     "/ready",
     response_model=HealthCheckResponse,
     summary="Readiness Check",

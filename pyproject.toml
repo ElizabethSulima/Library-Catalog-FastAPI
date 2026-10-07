@@ -48,6 +48,7 @@ pre-commit = "^4.6.2"
 pytest-cov = "^7.1.0"
 pytest-asyncio = "^1.4.0"
 respx = "^0.23.1"
+aiosqlite = "^0.22.1"
 
 [build-system]
 requires = ["poetry-core"]
@@ -108,9 +109,50 @@ init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
 
+[[tool.mypy.overrides]]
+module = [
+    "fastapi.*",
+    "starlette.*",
+    "pydantic_settings.*",
+    "pytest.*",
+    "httpx.*",
+    "anyio.*",
+    "pythonjsonlogger.*",
+    "uvicorn.*",
+    "slowapi.*",
+    "respx.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "app.tests.*"
+disallow_untyped_decorators = false
+disable_error_code = ["no-untyped-def", "misc"]
+
+[[tool.mypy.overrides]]
+module = "app.api.v1.routers.*"
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
+module = "app.main"
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
+module = "app.core.middleware.*"
+disable_error_code = ["misc"]
+
+[[tool.mypy.overrides]]
+module = "app.core.settings"
+disable_error_code = ["misc"]
+
+[[tool.mypy.overrides]]
+module = "app.core.exceptions"
+disallow_untyped_decorators = false
+
 # pytest
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
 addopts = "-x --cov=app --cov-report=term-missing"
 testpaths = ["app/tests"]
 filterwarnings = [

@@ -20,15 +20,14 @@ logger = logging.getLogger(__name__)
 class OpenLibraryClient(BaseApiClient):
     """Клиент для Open Library API"""
 
+    client_name = "openlibrary"
+
     def __init__(
         self,
         base_url: str = settings.OPENLIBRARY_BASE_URL,
         timeout: float = settings.OPENLIBRARY_TIMEOUT,
     ):
         super().__init__(base_url, timeout=timeout)
-
-    def client_name(self) -> str:
-        return "openlibrary"
 
     def _process_search_response(self, data: dict[str, Any] | list[Any] | str) -> dict[str, Any]:
         """
@@ -82,7 +81,7 @@ class OpenLibraryClient(BaseApiClient):
         title: str,
         author: str,
         isbn: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         """
         Обогатить данные книги.
 
@@ -103,9 +102,16 @@ class OpenLibraryClient(BaseApiClient):
                     exc.message,
                     extra={"isbn": isbn},
                 )
-        # Попытка 2: По title + author
+        # # Попытка 2: По title + author
         try:
-            return await self.search_by_title_author(title, author)
+            data = await self.search_by_title_author(title, author)
+            return data if data else None
+        except httpx.TimeoutException as exc:
+            raise OpenLibraryTimeoutException(timeout=self.timeout) from exc
+        except httpx.HTTPError as exc:
+            raise OpenLibraryException(
+                message=f"Transport error: {type(exc).__name__}: {exc}"
+            ) from exc
         except OpenLibraryException as exc:
             logger.warning(
                 "Open Library enrich by title/author failed: %s.",

@@ -1,7 +1,7 @@
 import logging
 import sys
 
-from pythonjsonlogger.jsonlogger import JsonFormatter
+from pythonjsonlogger.json import JsonFormatter
 
 from app.core.settings import settings
 

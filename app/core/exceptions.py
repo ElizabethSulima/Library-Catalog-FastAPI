@@ -11,6 +11,8 @@ class AppException(Exception):
     Все кастомные исключения должны наследоваться от него.
     """
 
+    code: str = "app_exception"
+
     def __init__(
         self,
         message: str,
@@ -22,25 +24,14 @@ class AppException(Exception):
         self.details = details or {}
         super().__init__(self.message)
 
-    @property
-    def error_code(self) -> str:
-        """
-        Автоматически генерирует код ошибки из имени класса.
-        Например: BookNotFoundException -> BOOK_NOT_FOUND_EXCEPTION
-        """
-        name = self.__class__.__name__
-        snake = "".join(
-            (f"_{c}" if c.isupper() and i > 0 and not name[i - 1].isupper() else c)
-            for i, c in enumerate(name)
-        )
-        return snake.upper()
-
 
 class NotFoundException(AppException):
     """
     Базовое исключение для случаев, когда ресурс не найден (404).
     Автоматически формирует сообщение вида: "{resource} with {identifier} not found".
     """
+
+    code = "not_found"
 
     def __init__(
         self,
@@ -65,11 +56,11 @@ class NotFoundException(AppException):
 def register_exception_handlers(app: fa.FastAPI) -> None:
     """Зарегистрировать обработчики исключений."""
 
-    @app.exception_handler(AppException)  # type: ignore[misc]
+    @app.exception_handler(AppException)
     async def app_exception_handler(request: fa.Request, exc: AppException) -> JSONResponse:
         content: dict[str, Any] = {
+            "code": exc.code,
             "detail": exc.message,
-            "error_code": exc.error_code,
         }
         if exc.details:
             content["details"] = exc.details

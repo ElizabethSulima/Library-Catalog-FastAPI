@@ -9,7 +9,7 @@ from starlette.responses import Response
 logger = logging.getLogger(__name__)
 
 
-class RequestLoggingMiddleware(BaseHTTPMiddleware):  # type: ignore[misc]
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """
     Логирует все HTTP запросы с деталями.
 

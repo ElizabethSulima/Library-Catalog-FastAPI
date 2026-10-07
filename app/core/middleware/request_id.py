@@ -6,7 +6,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 
-class RequestIDMiddleware(BaseHTTPMiddleware):  # type: ignore[misc]
+class RequestIDMiddleware(BaseHTTPMiddleware):
     """
     Добавляет уникальный request_id к каждому запросу.
 
