@@ -22,5 +22,5 @@ repos:
           - slowapi
           - respx
           - bcrypt
-          - jwt
+          - PyJWT>=2.8.0
         files: ^app/

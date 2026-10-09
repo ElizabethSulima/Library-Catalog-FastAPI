@@ -2,12 +2,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import bcrypt
-from jwt import (  # type: ignore[attr-defined]
-    ExpiredSignatureError,
-    InvalidTokenError,
-    decode,
-    encode,
-)
+import jwt
 
 from app.core.exceptions import AuthenticationException
 from app.core.settings import settings
@@ -39,7 +34,7 @@ def create_access_token(data: dict[str, Any], expires_delta: timedelta | None = 
 
     to_encode.update({"exp": expire, "iat": datetime.now(UTC), "type": "access"})
 
-    encoded_jwt = encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return str(encoded_jwt)
 
 
@@ -50,16 +45,16 @@ def create_refresh_token(data: dict[str, Any]) -> str:
 
     to_encode.update({"exp": expire, "iat": datetime.now(UTC), "type": "refresh"})
 
-    encoded_jwt = encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return str(encoded_jwt)
 
 
 def decode_token(token: str) -> dict[str, Any]:
     """Декодировать и проверить токен"""
     try:
-        payload = decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-        return payload  # type: ignore[no-any-return]
-    except ExpiredSignatureError:
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
         raise AuthenticationException(message="Token has expired") from None
-    except InvalidTokenError:
+    except jwt.InvalidTokenError:
         raise AuthenticationException(message="Invalid token") from None
