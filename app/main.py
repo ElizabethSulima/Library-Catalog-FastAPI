@@ -10,12 +10,11 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
-from app.api.v1.routers import books, health
+from app.api.v1.routers import auth, books, health
 from app.core.exceptions import register_exception_handlers
+from app.core.limiter import limiter
 from app.core.logging_config import setup_logging
 from app.core.middleware.logging import RequestLoggingMiddleware
 from app.core.middleware.request_id import RequestIDMiddleware
@@ -100,7 +99,6 @@ def create_app() -> FastAPI:
     Фабрика для создания экземпляра приложения.
     Необходима для корректной работы тестов (dependency_overrides).
     """
-    limiter: Limiter = Limiter(key_func=get_remote_address, default_limits=["100 per minute"])
 
     app = FastAPI(
         title=settings.APP_NAME,
@@ -126,6 +124,8 @@ def create_app() -> FastAPI:
         health.router,
         prefix=settings.API_V1_PREFIX,
     )
+
+    app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
 
     @app.get("/")
     @limiter.limit("200 per minute")

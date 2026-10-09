@@ -1,9 +1,10 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 
-from app.api.dependencies import BookServiceDep
+from app.api.dependencies import BookServiceDep, CurrentUserDep
+from app.core.limiter import limiter
 from app.schemas.book import BookCreate, BookFilters, BookResponse, BookUpdate
 from app.schemas.pagination import PaginatedResponse, PaginationParams
 
@@ -16,9 +17,12 @@ router = APIRouter(prefix="/books", tags=["Books"])
     status_code=status.HTTP_201_CREATED,
     summary="Создать книгу",
 )
+@limiter.limit("5/minute")
 async def create_book(
+    request: Request,
     book_data: BookCreate,
     service: BookServiceDep,
+    current_user: CurrentUserDep,
 ) -> BookResponse:
     """
     Создать новую книгу
@@ -31,7 +35,9 @@ async def create_book(
     response_model=PaginatedResponse[BookResponse],
     summary="Получить список книг",
 )
+@limiter.limit("30/minute")
 async def get_books(
+    request: Request,
     service: BookServiceDep,
     pagination: Annotated[PaginationParams, Depends()],
     filters: Annotated[BookFilters, Depends()],
@@ -55,7 +61,9 @@ async def get_books(
     response_model=BookResponse,
     summary="Получить информацию о книге по id",
 )
+@limiter.limit("60/minute")
 async def get_book(
+    request: Request,
     book_id: UUID,
     service: BookServiceDep,
 ) -> BookResponse:
@@ -70,10 +78,13 @@ async def get_book(
     response_model=BookResponse,
     summary="Обновить книгу",
 )
+@limiter.limit("10/minute")
 async def update_book(
+    request: Request,
     book_id: UUID,
     book_data: BookUpdate,
     service: BookServiceDep,
+    current_user: CurrentUserDep,
 ) -> BookResponse:
     """
     Обновить книгу.
@@ -90,9 +101,12 @@ async def update_book(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Удалить книгу",
 )
+@limiter.limit("5/minute")
 async def delete_book(
+    request: Request,
     book_id: UUID,
     service: BookServiceDep,
+    current_user: CurrentUserDep,
 ) -> None:
     """
     Удалить книгу.

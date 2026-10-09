@@ -14,6 +14,16 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     DEBUG: bool = True
 
+    # JWT Settings
+    JWT_SECRET_KEY: str
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # Redis для refresh токенов и rate limiting
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_EXPIRE_TIME: int = 3600
+
     # fastapi app
     APP_NAME: str = "LIBRARY CATALOG"
     APP_VERSION: str = "1.0.0"

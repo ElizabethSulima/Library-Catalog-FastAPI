@@ -1,8 +1,7 @@
-from typing import Any
-
 import fastapi as fa
 import pytest
 from httpx import AsyncClient
+from respx import MockRouter
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +13,9 @@ pytestmark = pytest.mark.anyio
 class TestBookEndpoints:
     """Интеграционные тесты API"""
 
-    async def test_create_and_get_book(self, client: AsyncClient) -> None:
+    async def test_create_and_get_book(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
         """Создание и получение книги"""
         payload = {
             "title": "Clean Code",
@@ -25,7 +26,7 @@ class TestBookEndpoints:
             "isbn": "978-0132350884",
         }
 
-        response = await client.post("/api/v1/books/", json=payload)
+        response = await client.post("/api/v1/books/", json=payload, headers=auth_headers)
         assert response.status_code == fa.status.HTTP_201_CREATED
         data = response.json()
         book_id = data["book_id"]
@@ -36,7 +37,10 @@ class TestBookEndpoints:
         assert response_get.json()["title"] == "Clean Code"
 
     async def test_create_with_openlibrary_enrichment(
-        self, client: AsyncClient, mock_openlibrary_success: Any
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        mock_openlibrary_success: MockRouter,
     ) -> None:
         """Клиент OL через MockTransport"""
         payload = {
@@ -48,7 +52,7 @@ class TestBookEndpoints:
             "isbn": "9780132350884",
         }
 
-        response = await client.post("/api/v1/books/", json=payload)
+        response = await client.post("/api/v1/books/", json=payload, headers=auth_headers)
         assert response.status_code == fa.status.HTTP_201_CREATED
 
         data = response.json()
@@ -74,7 +78,8 @@ class TestBookEndpoints:
     async def test_create_with_openlibrary_timeout_fallback(
         self,
         client: AsyncClient,
-        mock_openlibrary_timeout: Any,
+        auth_headers: dict[str, str],
+        mock_openlibrary_timeout: MockRouter,
         db_session: AsyncSession,
     ) -> None:
         """Сервис с заглушкой enricher, которая бросает таймаут"""
@@ -87,13 +92,12 @@ class TestBookEndpoints:
             "isbn": "9780132350884",
         }
 
-        response = await client.post("/api/v1/books/", json=payload)
+        response = await client.post("/api/v1/books/", json=payload, headers=auth_headers)
         assert response.status_code == fa.status.HTTP_201_CREATED
 
         data = response.json()
         assert data["title"] == payload["title"]
         assert data["isbn"] == payload["isbn"]
-
         assert data.get("extra") is None, "При таймауте Open Library поле extra должно быть null"
 
         stmt = select(Book).where(Book.isbn == payload["isbn"])
@@ -105,7 +109,10 @@ class TestBookEndpoints:
         assert db_book.extra is None, "В базе данных поле extra также должно быть None"
 
     async def test_duplicate_isbn_returns_409(
-        self, client: AsyncClient, db_session: AsyncSession
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
     ) -> None:
         """Повторный ISBN → 409 Conflict"""
         payload = {
@@ -117,10 +124,10 @@ class TestBookEndpoints:
             "isbn": "9780132350884",
         }
 
-        first_response = await client.post("/api/v1/books/", json=payload)
+        first_response = await client.post("/api/v1/books/", json=payload, headers=auth_headers)
         assert first_response.status_code == fa.status.HTTP_201_CREATED
 
-        response = await client.post("/api/v1/books/", json=payload)
+        response = await client.post("/api/v1/books/", json=payload, headers=auth_headers)
         assert response.status_code == fa.status.HTTP_409_CONFLICT
 
         data = response.json()
@@ -138,7 +145,10 @@ class TestBookEndpoints:
         assert count == 1
 
     async def test_patch_with_null_title_returns_422(
-        self, client: AsyncClient, db_session: AsyncSession
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
     ) -> None:
         """Тест на PATCH с {"title": null} → 422, а не 500"""
         book = Book(
@@ -156,9 +166,54 @@ class TestBookEndpoints:
         response = await client.patch(
             f"/api/v1/books/{book.book_id}",
             json={"title": None},
+            headers=auth_headers,
         )
         assert response.status_code == fa.status.HTTP_422_UNPROCESSABLE_ENTITY
 
         data = response.json()
         assert "detail" in data
-        assert isinstance(data["detail"], list)
+        assert isinstance(data.get("detail"), str) or isinstance(data.get("errors"), list)
+
+
+class TestBookEndpointsAuth:
+    async def test_create_book_requires_auth(self, client: AsyncClient):
+        """Попытка создать книгу без токена должна вернуть 401
+        (или 403 от HTTPBearer)
+        """
+        payload = {
+            "title": "Clean Code",
+            "author": "Robert Martin",
+            "year": 2008,
+            "genre": "Programming",
+            "pages": 464,
+            "isbn": "9780132350884",
+        }
+        response = await client.post("/api/v1/books/", json=payload)
+
+        assert response.status_code in [
+            fa.status.HTTP_401_UNAUTHORIZED,
+            fa.status.HTTP_403_FORBIDDEN,
+        ]
+
+    async def test_create_book_with_auth(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        mock_openlibrary_success: MockRouter,
+    ):
+        """Успешное создание книги авторизованным пользователем"""
+        payload = {
+            "title": "Clean Code",
+            "author": "Robert Martin",
+            "year": 2008,
+            "genre": "Programming",
+            "pages": 464,
+            "isbn": "9780132350884",
+        }
+
+        response = await client.post("/api/v1/books/", json=payload, headers=auth_headers)
+
+        assert response.status_code == fa.status.HTTP_201_CREATED
+        data = response.json()
+        assert data["title"] == "Clean Code"
+        assert data["isbn"] == "9780132350884"

@@ -79,9 +79,9 @@ class BookRepository:
         available: bool | None,
     ) -> sa.Select[_T]:
         if title:
-            stmt = stmt.where(Book.title.ilike(f"%{title}%"))
+            stmt = stmt.where(Book.title.icontains(title, autoescape=True))
         if author:
-            stmt = stmt.where(Book.author.ilike(f"%{author}%"))
+            stmt = stmt.where(Book.author.icontains(author, autoescape=True))
         if genre:
             stmt = stmt.where(Book.genre == genre)
         if year is not None:

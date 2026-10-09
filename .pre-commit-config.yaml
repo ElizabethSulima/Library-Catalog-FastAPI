@@ -21,4 +21,6 @@ repos:
           - httpx
           - slowapi
           - respx
+          - bcrypt
+          - jwt
         files: ^app/

@@ -24,6 +24,8 @@ class BookBase(BaseModel):
 class BookCreate(BookBase):
     """Схема для создания книги"""
 
+    model_config = ConfigDict(extra="forbid")
+
     isbn: str | None = Field(None, min_length=10, max_length=20)
     description: str | None = Field(None, max_length=5000)
     extra: dict[str, Any] | None = Field(None, description="Дополнительные метаданные")
@@ -73,6 +75,8 @@ class BookCreate(BookBase):
 
 class BookUpdate(BaseModel):
     """Схема для обновления книги (все поля опциональны)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     title: str | None = Field(None, min_length=1, max_length=500)
     author: str | None = Field(None, min_length=1, max_length=300)
