@@ -2,7 +2,13 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class BookBase(BaseModel):
@@ -18,11 +24,11 @@ class BookBase(BaseModel):
 class BookCreate(BookBase):
     """Схема для создания книги"""
 
+    model_config = ConfigDict(extra="forbid")
+
     isbn: str | None = Field(None, min_length=10, max_length=20)
     description: str | None = Field(None, max_length=5000)
-    extra: dict[str, Any] | None = Field(
-        None, description="Дополнительные метаданные"
-    )
+    extra: dict[str, Any] | None = Field(None, description="Дополнительные метаданные")
 
     @field_validator("isbn", mode="before")
     @classmethod
@@ -35,9 +41,7 @@ class BookCreate(BookBase):
 
         # Проверка: только цифры (и 'X' для ISBN-10)
         if not clean.replace("X", "").isdigit():
-            raise ValueError(
-                "ISBN должен содержать только цифры и, возможно, 'X' на конце"
-            )
+            raise ValueError("ISBN должен содержать только цифры и, возможно, 'X' на конце")
 
         # Проверка длины
         if len(clean) not in (10, 13):
@@ -72,6 +76,8 @@ class BookCreate(BookBase):
 class BookUpdate(BaseModel):
     """Схема для обновления книги (все поля опциональны)."""
 
+    model_config = ConfigDict(extra="forbid")
+
     title: str | None = Field(None, min_length=1, max_length=500)
     author: str | None = Field(None, min_length=1, max_length=300)
     year: int | None = Field(None, ge=1000, le=2100)
@@ -82,6 +88,19 @@ class BookUpdate(BaseModel):
     description: str | None = Field(None, max_length=5000)
     extra: dict[str, Any] | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_explicit_nulls(cls, data: Any) -> Any:
+        """
+        Запрещаем явную передачу null для любых полей.
+        Это гарантирует возврат 422 вместо 500.
+        """
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if value is None:
+                    raise ValueError(f"Field '{key}' cannot be explicitly set to null")
+        return data
+
 
 class BookResponse(BookBase):
     """Схема для отображения книги (response)."""
@@ -90,7 +109,7 @@ class BookResponse(BookBase):
     available: bool
     isbn: str | None
     description: str | None
-    extra: dict | None
+    extra: dict[str, Any] | None
     created_at: datetime
     updated_at: datetime
 
@@ -133,10 +152,6 @@ class BookFilters(BaseModel):
         max_length=100,
         description="Поиск по автору (частичное совпадение)",
     )
-    genre: str | None = Field(
-        None, max_length=100, description="Точное совпадение жанра"
-    )
-    year: int | None = Field(
-        None, ge=1000, le=2100, description="Точное совпадение года"
-    )
+    genre: str | None = Field(None, max_length=100, description="Точное совпадение жанра")
+    year: int | None = Field(None, ge=1000, le=2100, description="Точное совпадение года")
     available: bool | None = Field(None, description="Фильтр по доступности")

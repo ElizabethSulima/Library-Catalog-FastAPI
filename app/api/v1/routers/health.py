@@ -1,66 +1,98 @@
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Response, status
 from sqlalchemy import text
 
-from app.api.dependencies import DbSessionDep
+from app.core.session import AsyncSessionDependency
 from app.core.settings import settings
-from app.schemas.paginations import HealthCheckResponse
+from app.schemas.health import HealthCheckResponse, LivenessResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/health", tags=["Health"])
 
-START_TIME = datetime.now(timezone.utc)
+START_TIME = datetime.now(UTC)
 
 
 @router.get(
-    "/",
-    response_model=HealthCheckResponse,
-    summary="Health Check",
-    description="Проверить состояние сервиса и подключение к БД",
+    "/live",
+    response_model=LivenessResponse,
+    summary="Liveness Check",
     responses={
-        200: {"description": "Сервис работает корректно"},
-        503: {"description": "Сервис работает, но БД недоступна"},
+        200: {"description": "Процесс приложения запущен и отвечает"},
     },
 )
-async def health_check(db: DbSessionDep):
+async def liveness_check() -> LivenessResponse:
     """
-    Проверить здоровье сервиса.
+    Проверка живости (Liveness).
 
-    Проверяет:
-    - Сервис запущен
-    - Подключение к БД работает
+    Отвечает на вопрос: "Перезагружать ли контейнер?"
+    Не проверяет внешние зависимости (БД), чтобы избежать каскадных перезагрузок
+    при временных сбоях базы данных.
+    """
+    return LivenessResponse(
+        status="alive",
+        version=settings.APP_VERSION,
+    )
+
+
+@router.get(
+    "/ready",
+    response_model=HealthCheckResponse,
+    summary="Readiness Check",
+    responses={
+        200: {
+            "description": "Сервис и БД работают корректно",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status": "healthy",
+                        "database": "connected",
+                        "version": "1.0.0",
+                        "uptime_seconds": 3600,
+                        "timestamp": "2026-10-02T12:00:00Z",
+                    }
+                }
+            },
+        },
+        503: {
+            "description": "Сервис работает, но БД недоступна",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status": "unhealthy",
+                        "database": "disconnected",
+                        "version": "1.0.0",
+                        "uptime_seconds": 3600,
+                        "timestamp": "2026-10-02T12:00:00Z",
+                    }
+                }
+            },
+        },
+    },
+)
+async def readiness_check(db: AsyncSessionDependency, response: Response) -> HealthCheckResponse:
+    """
+    Проверка готовности (Readiness).
+
+    Отвечает на вопрос: "Готов ли сервис обрабатывать запросы?"
+    Проверяет подключение к базе данных.
     """
     try:
         await db.execute(text("SELECT 1"))
-        db_status = "connected"
-        overall_status = "healthy"
-        http_status = status.HTTP_200_OK
-    except Exception as exc:  # pylint: disable=W0718
-        logger.error("Database health check failed: %s", exc, exc_info=True)
-        db_status = "disconnected"
-        overall_status = "unhealthy"
-        http_status = status.HTTP_503_SERVICE_UNAVAILABLE
+        db_ok = True
+    except Exception:  # pylint: disable=W0718
+        logger.exception("Database health check failed")
+        db_ok = False
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
-    uptime_seconds = (datetime.now(timezone.utc) - START_TIME).total_seconds()
+    uptime_seconds = (datetime.now(UTC) - START_TIME).total_seconds()
 
-    response = HealthCheckResponse(
-        status=overall_status,
-        database=db_status,
-        version=(
-            settings.APP_VERSION
-            if hasattr(settings, "APP_VERSION")
-            else "unknown"
-        ),
+    return HealthCheckResponse(
+        status="healthy" if db_ok else "unhealthy",
+        database="connected" if db_ok else "disconnected",
+        version=settings.APP_VERSION,
         uptime_seconds=int(uptime_seconds),
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
     )
-    if http_status != status.HTTP_200_OK:
-        raise HTTPException(
-            status_code=http_status,
-            detail=response.model_dump(),
-        )
-
-    return response

@@ -1,3 +1,6 @@
+import logging
+from typing import Any
+
 import httpx
 
 from app.core.settings import settings
@@ -6,11 +9,18 @@ from app.domain.exceptions import (
     OpenLibraryTimeoutException,
 )
 from app.external.base.base_client import BaseApiClient
-from app.external.openlibrary.schemas import OpenLibrarySearchResponse
+from app.external.openlibrary.schemas import (
+    OpenLibrarySearchDoc,
+    OpenLibrarySearchResponse,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class OpenLibraryClient(BaseApiClient):
-    """Клиент для Open Library API."""
+    """Клиент для Open Library API"""
+
+    client_name = "openlibrary"
 
     def __init__(
         self,
@@ -19,10 +29,7 @@ class OpenLibraryClient(BaseApiClient):
     ):
         super().__init__(base_url, timeout=timeout)
 
-    def client_name(self) -> str:
-        return "openlibrary"
-
-    def _process_search_response(self, data: dict | list | str) -> dict:
+    def _process_search_response(self, data: dict[str, Any] | list[Any] | str) -> dict[str, Any]:
         """
         Обработать сырой ответ от /search.json.
         Проверяет тип данных и извлекает первую книгу из массива docs.
@@ -33,7 +40,7 @@ class OpenLibraryClient(BaseApiClient):
 
         return self._extract_book_data(response.docs[0])
 
-    async def search_by_isbn(self, isbn: str) -> dict:
+    async def search_by_isbn(self, isbn: str) -> dict[str, Any]:
         """
         Поиск книги по ISBN.
 
@@ -47,9 +54,7 @@ class OpenLibraryClient(BaseApiClient):
             OpenLibraryException: При ошибке API
         """
         try:
-            data = await self._get(
-                "/search.json", params={"isbn": isbn, "limit": 1}
-            )
+            data = await self._get("/search.json", params={"isbn": isbn, "limit": 1})
             return self._process_search_response(data)
 
         except httpx.TimeoutException as exc:
@@ -57,7 +62,7 @@ class OpenLibraryClient(BaseApiClient):
         except httpx.HTTPError as e:
             raise OpenLibraryException(str(e)) from e
 
-    async def search_by_title_author(self, title: str, author: str) -> dict:
+    async def search_by_title_author(self, title: str, author: str) -> dict[str, Any]:
         """Поиск по названию и автору"""
         try:
             data = await self._get(
@@ -76,7 +81,7 @@ class OpenLibraryClient(BaseApiClient):
         title: str,
         author: str,
         isbn: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any] | None:
         """
         Обогатить данные книги.
 
@@ -91,13 +96,31 @@ class OpenLibraryClient(BaseApiClient):
                 data = await self.search_by_isbn(isbn)
                 if data:
                     return data
-            except OpenLibraryException:
-                pass
+            except OpenLibraryException as exc:
+                logger.warning(
+                    "Open Library enrich by ISBN failed: %s. Falling back to title/author.",
+                    exc.message,
+                    extra={"isbn": isbn},
+                )
+        # # Попытка 2: По title + author
+        try:
+            data = await self.search_by_title_author(title, author)
+            return data if data else None
+        except httpx.TimeoutException as exc:
+            raise OpenLibraryTimeoutException(timeout=self.timeout) from exc
+        except httpx.HTTPError as exc:
+            raise OpenLibraryException(
+                message=f"Transport error: {type(exc).__name__}: {exc}"
+            ) from exc
+        except OpenLibraryException as exc:
+            logger.warning(
+                "Open Library enrich by title/author failed: %s.",
+                exc.message,
+                extra={"title": title, "author": author},
+            )
+            return {}
 
-        # Попытка 2: По title + author
-        return await self.search_by_title_author(title, author)
-
-    def _extract_book_data(self, doc: dict) -> dict:
+    def _extract_book_data(self, doc: OpenLibrarySearchDoc) -> dict[str, Any]:
         """
         Извлечь нужные поля из ответа Open Library.
 
@@ -107,36 +130,21 @@ class OpenLibraryClient(BaseApiClient):
         Returns:
             dict: Обработанные данные
         """
-        result = {}
+        result: dict[str, Any] = {}
+        if doc.cover_i:
+            result["cover_url"] = self._get_cover_url(doc.cover_i)
 
-        # Cover URL
-        if cover_id := doc.get("cover_i"):
-            result["cover_url"] = self._get_cover_url(cover_id)
+        if doc.subject:
+            result["subjects"] = doc.subject[:10]
 
-        # Subjects (темы)
-        subjects = doc.get("subject", [])
-        if isinstance(subjects, list):
-            result["subjects"] = subjects[:10]
-        elif isinstance(subjects, str):
-            result["subjects"] = [subjects]
+        if doc.publisher:
+            result["publisher"] = doc.publisher[0]
 
-        # Publisher
-        publishers = doc.get("publisher")
-        if isinstance(publishers, list) and publishers:
-            result["publisher"] = publishers[0]
-        elif isinstance(publishers, str):
-            result["publisher"] = publishers
+        if doc.language:
+            result["language"] = doc.language[0]
 
-        # Language
-        languages = doc.get("language")
-        if isinstance(languages, list) and languages:
-            result["language"] = languages[0]
-        elif isinstance(languages, str):
-            result["language"] = languages
-
-        # Ratings
-        if ratings := doc.get("ratings_average"):
-            result["rating"] = ratings
+        if doc.ratings_average:
+            result["rating"] = doc.ratings_average
 
         return result
 

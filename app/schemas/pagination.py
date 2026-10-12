@@ -1,9 +1,14 @@
-from datetime import datetime
-from typing import Generic, TypeVar
+from collections.abc import Sequence
+from typing import Self
 
 from pydantic import BaseModel, Field
 
-T = TypeVar("T")
+
+class ErrorResponse(BaseModel):
+    """Универсальная схема для описания ошибок в OpenAPI"""
+
+    detail: str = Field(..., description="Описание ошибки")
+    error_code: str | None = Field(None, description="Внутренний код ошибки")
 
 
 class PaginationParams(BaseModel):
@@ -23,10 +28,10 @@ class PaginationParams(BaseModel):
         return self.page_size
 
 
-class PaginatedResponse(BaseModel, Generic[T]):
+class PaginatedResponse[T](BaseModel):
     """Generic схема для пагинированных ответов"""
 
-    items: list[T]
+    items: Sequence[T]
     total: int = Field(..., description="Всего элементов")
     page: int = Field(..., description="Текущая страница")
     page_size: int = Field(..., description="Размер страницы")
@@ -38,7 +43,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
         items: list[T],
         total: int,
         pagination: PaginationParams,
-    ):
+    ) -> Self:
         """Создать пагинированный ответ"""
         pages = (total + pagination.page_size - 1) // pagination.page_size
 
@@ -49,19 +54,3 @@ class PaginatedResponse(BaseModel, Generic[T]):
             page_size=pagination.page_size,
             pages=pages,
         )
-
-
-class HealthCheckResponse(BaseModel):
-    """Схема для health check"""
-
-    status: str = Field(
-        ..., description="Общий статус сервиса (healthy/unhealthy)"
-    )
-    database: str = Field(
-        ..., description="Статус подключения к БД (connected/disconnected)"
-    )
-    version: str = Field(..., description="Версия приложения")
-    uptime_seconds: int = Field(
-        ..., description="Время работы сервиса в секундах"
-    )
-    timestamp: datetime = Field(..., description="Время проверки (UTC)")

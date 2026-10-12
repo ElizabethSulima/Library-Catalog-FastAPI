@@ -1,40 +1,37 @@
-from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, cast
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependency import AsyncSessionDepency
-from app.core.settings import settings
+from app.core.security import decode_token
+from app.core.session import AsyncSessionDependency, get_async_session
 from app.external.openlibrary.client import OpenLibraryClient
+from app.models.user import User
 from app.repositories.book import BookRepository
 from app.services.book import BookService
+
+security = HTTPBearer()
 
 # ========== EXTERNAL CLIENTS (Singletons) ==========
 
 
-@lru_cache
-def get_openlibrary_client() -> OpenLibraryClient:
+def get_openlibrary_client(request: Request) -> OpenLibraryClient:
     """
-    Получить singleton OpenLibraryClient.
-
-    lru_cache создает клиент один раз и переиспользует.
+    Зависимость для получения экземпляра OpenLibraryClient
     """
-    return OpenLibraryClient(
-        base_url=settings.OPENLIBRARY_BASE_URL,
-        timeout=settings.OPENLIBRARY_TIMEOUT,
-    )
+    return cast(OpenLibraryClient, request.app.state.ol_client)
 
 
 # ========== REPOSITORIES ==========
 
 
 async def get_book_repository(
-    db: AsyncSessionDepency,
+    db: AsyncSessionDependency,
 ) -> BookRepository:
     """
     Создать BookRepository для текущей сессии БД.
-
-    Создается новый экземпляр для каждого запроса.
     """
     return BookRepository(db)
 
@@ -48,12 +45,6 @@ async def get_book_service(
 ) -> BookService:
     """
     Создать BookService с внедренными зависимостями.
-
-    FastAPI автоматически разрешит все зависимости:
-    1. get_db() создаст AsyncSession
-    2. get_book_repository() создаст BookRepository с session
-    3. get_openlibrary_client() вернет singleton клиент
-    4. Все внедрится в BookService
     """
     return BookService(
         book_repository=book_repo,
@@ -61,10 +52,58 @@ async def get_book_service(
     )
 
 
+# ========== AUTHENTIFICATION ===========
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    session: AsyncSession = Depends(get_async_session),
+) -> User:
+    """Получить текущего пользователя из токена"""
+    token = credentials.credentials
+
+    try:
+        payload = decode_token(token)
+
+        if payload.get("type") != "access":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token type",
+            )
+
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload",
+            )
+
+        stmt = select(User).where(User.user_id == int(user_id))
+        result = await session.execute(stmt)
+        user = result.scalar_one_or_none()
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+            )
+
+        if not user.is_active:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
+
+        return user
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from None
+
+
 # ========== TYPE ALIASES ДЛЯ УДОБСТВА ==========
 
-# Можно использовать в роутерах так:
-# async def my_route(service: BookServiceDep):
 BookServiceDep = Annotated[BookService, Depends(get_book_service)]
 BookRepoDep = Annotated[BookRepository, Depends(get_book_repository)]
-DbSessionDep = AsyncSessionDepency
+CurrentUserDep = Annotated[User, Depends(get_current_user)]

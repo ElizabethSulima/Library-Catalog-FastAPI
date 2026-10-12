@@ -1,11 +1,12 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 
-from app.api.dependencies import BookServiceDep
+from app.api.dependencies import BookServiceDep, CurrentUserDep
+from app.core.limiter import limiter
 from app.schemas.book import BookCreate, BookFilters, BookResponse, BookUpdate
-from app.schemas.paginations import PaginatedResponse, PaginationParams
+from app.schemas.pagination import PaginatedResponse, PaginationParams
 
 router = APIRouter(prefix="/books", tags=["Books"])
 
@@ -15,22 +16,16 @@ router = APIRouter(prefix="/books", tags=["Books"])
     response_model=BookResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Создать книгу",
-    description="Создать новую книгу в каталоге с автоматическим обогащением из Open Library",
 )
+@limiter.limit("5/minute")
 async def create_book(
+    request: Request,
     book_data: BookCreate,
     service: BookServiceDep,
-):
+    current_user: CurrentUserDep,
+) -> BookResponse:
     """
-    Создать новую книгу.
-
-    Автоматически обогащает данные из Open Library API:
-    - Обложка книги
-    - Темы/subjects
-    - Издатель
-    - Рейтинг
-
-    Если Open Library недоступен, книга все равно будет создана.
+    Создать новую книгу
     """
     return await service.create_book(book_data)
 
@@ -39,58 +34,41 @@ async def create_book(
     "/",
     response_model=PaginatedResponse[BookResponse],
     summary="Получить список книг",
-    description="Получить список книг с фильтрацией и пагинацией",
 )
+@limiter.limit("30/minute")
 async def get_books(
+    request: Request,
     service: BookServiceDep,
     pagination: Annotated[PaginationParams, Depends()],
     filters: Annotated[BookFilters, Depends()],
-):
+) -> PaginatedResponse[BookResponse]:
     """
-    Получить список книг с фильтрацией.
-
-    Поддерживаемые фильтры:
-    - title: частичное совпадение (регистронезависимо)
-    - author: частичное совпадение (регистронезависимо)
-    - genre: точное совпадение
-    - year: точное совпадение
-    - available: True/False
-
-    Пагинация:
-    - page: номер страницы (начиная с 1)
-    - page_size: размер страницы (1-100, по умолчанию 20)
+    Получить список книг с фильтрацией
     """
-    books, total = await service.search_books(
+    return await service.search_books(
         title=filters.title,
         author=filters.author,
         genre=filters.genre,
         year=filters.year,
         available=filters.available,
-        limit=pagination.limit,
-        offset=pagination.offset,
+        page=pagination.page,
+        page_size=pagination.page_size,
     )
-
-    return PaginatedResponse.create(books, total, pagination)
 
 
 @router.get(
     "/{book_id}",
     response_model=BookResponse,
-    summary="Получить книгу",
-    description="Получить информацию о конкретной книге по ID",
+    summary="Получить информацию о книге по id",
 )
+@limiter.limit("60/minute")
 async def get_book(
+    request: Request,
     book_id: UUID,
     service: BookServiceDep,
-):
+) -> BookResponse:
     """
-    Получить книгу по ID.
-
-    Returns:
-        ShowBook: Полная информация о книге
-
-    Raises:
-        404: Книга не найдена
+    Получить книгу по ID
     """
     return await service.get_book(book_id)
 
@@ -99,25 +77,21 @@ async def get_book(
     "/{book_id}",
     response_model=BookResponse,
     summary="Обновить книгу",
-    description="Частичное обновление книги (передаются только изменяемые поля)",
 )
+@limiter.limit("10/minute")
 async def update_book(
+    request: Request,
     book_id: UUID,
     book_data: BookUpdate,
     service: BookServiceDep,
-):
+    current_user: CurrentUserDep,
+) -> BookResponse:
     """
     Обновить книгу.
 
-    Передаются только те поля, которые нужно изменить.
-    Остальные поля остаются без изменений.
-
-    Returns:
-        ShowBook: Обновленная книга
-
     Raises:
         404: Книга не найдена
-        400: Невалидные данные
+        422: Невалидные данные
     """
     return await service.update_book(book_id, book_data)
 
@@ -126,12 +100,14 @@ async def update_book(
     "/{book_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Удалить книгу",
-    description="Удалить книгу из каталога",
 )
+@limiter.limit("5/minute")
 async def delete_book(
+    request: Request,
     book_id: UUID,
     service: BookServiceDep,
-):
+    current_user: CurrentUserDep,
+) -> None:
     """
     Удалить книгу.
 

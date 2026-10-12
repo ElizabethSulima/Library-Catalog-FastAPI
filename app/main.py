@@ -2,21 +2,32 @@
 Library Catalog API - Точка входа приложения.
 """
 
+import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 
-from app.api.v1.routers import books, health
-from app.core.dependency import dispose_engine
+from app.api.v1.routers import auth, books, health
 from app.core.exceptions import register_exception_handlers
+from app.core.limiter import limiter
 from app.core.logging_config import setup_logging
+from app.core.middleware.logging import RequestLoggingMiddleware
+from app.core.middleware.request_id import RequestIDMiddleware
+from app.core.session import dispose_engine
 from app.core.settings import settings
+from app.external.openlibrary.client import OpenLibraryClient
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     Lifecycle manager для FastAPI.
 
@@ -25,67 +36,115 @@ async def lifespan(app: FastAPI):
     - shutdown: закрытие подключений к БД
     """
     # Startup
-    setup_logging()
-    print("🚀 Application started")
-
+    app.state.ol_client = OpenLibraryClient(
+        base_url=settings.OPENLIBRARY_BASE_URL,
+        timeout=settings.OPENLIBRARY_TIMEOUT,
+    )
+    logger.info("Application started")
     yield
 
     # Shutdown
+    await app.state.ol_client.close()
     await dispose_engine()
-    print("👋 Application stopped")
+    logger.info("Application stopped")
 
 
-app = FastAPI(
-    title=settings.APP_NAME,
-    docs_url=settings.DOCS_URL,
-    redoc_url=settings.REDOC_URL,
-    version="1.0.0",
-    description="REST API для управления библиотечным каталогом",
-    lifespan=lifespan,
-)
+def setup_middleware(app: FastAPI) -> None:
+    """
+    Настроить middleware для приложения.
 
+    Порядок важен: middleware выполняются в обратном порядке добавления.
+    """
+    # 1. Request ID - должен быть первым, чтобы все логи имели request_id
+    app.add_middleware(RequestIDMiddleware)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    # 2. Request logging - логирует все запросы
+    app.add_middleware(RequestLoggingMiddleware)
 
-register_exception_handlers(app)
-
-app.include_router(
-    books.router,
-    prefix=settings.API_V1_PREFIX,
-)
-app.include_router(
-    health.router,
-    prefix=settings.API_V1_PREFIX,
-)
-
-
-@app.get("/")
-async def root():
-    """Корневой эндпоинт."""
-    return {
-        "message": "Welcome to Library Catalog API",
-        "docs": settings.DOCS_URL,
-        "version": "1.0.0",
-    }
-
-
-if not settings.DEBUG:
+    # 3. CORS - настраивается один раз
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.APP_ALLOWED_ORIGINS,
-        allow_credentials=True,
+        allow_origins=settings.CORS_ORIGINS,
+        allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
     )
-    app.add_middleware(
-        TrustedHostMiddleware, allowed_hosts=settings.APP_ALLOWED_HOSTS
+
+    if settings.is_production:
+        app.add_middleware(
+            TrustedHostMiddleware,
+            allowed_hosts=settings.CORS_ORIGINS,
+        )
+
+
+async def rate_limit_exceeded_handler(request: Request, exc: Exception) -> JSONResponse:
+    """
+    Обработчик превышения лимита запросов (Rate Limit)
+    """
+    request_id = getattr(request.state, "request_id", "unknown")
+
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={
+            "detail": "Too Many Requests",
+            "error": str(exc),
+            "request_id": request_id,
+        },
+        headers={"X-Request-ID": request_id},
     )
+
+
+def create_app() -> FastAPI:
+    """
+    Фабрика для создания экземпляра приложения.
+    Необходима для корректной работы тестов (dependency_overrides).
+    """
+
+    app = FastAPI(
+        title=settings.APP_NAME,
+        version=settings.APP_VERSION,
+        docs_url=settings.docs_url if not settings.is_production else None,
+        redoc_url=settings.redoc_url if not settings.is_production else None,
+        openapi_url=(settings.openapi_url if not settings.is_production else None),
+        description="REST API для управления библиотечным каталогом",
+        lifespan=lifespan,
+    )
+
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+
+    setup_middleware(app)
+    register_exception_handlers(app)
+
+    app.include_router(
+        books.router,
+        prefix=settings.API_V1_PREFIX,
+    )
+    app.include_router(
+        health.router,
+        prefix=settings.API_V1_PREFIX,
+    )
+
+    app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
+
+    @app.get("/")
+    @limiter.limit("200 per minute")
+    async def root(request: Request) -> dict[str, str | None]:
+        """Корневой эндпоинт."""
+        response: dict[str, str | None] = {
+            "message": "Welcome to Library Catalog API",
+            "version": settings.APP_VERSION,
+        }
+        if not settings.is_production:
+            response["docs"] = "/docs"
+        return response
+
+    return app
+
+
+app_fast = create_app()
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app_fast, host="0.0.0.0", port=8000)
