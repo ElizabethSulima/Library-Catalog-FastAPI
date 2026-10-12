@@ -24,7 +24,7 @@ from app.repositories.book import BookRepository
 from app.services.book import BookService
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def engine() -> AsyncEngine:
     return create_async_engine(
         "sqlite+aiosqlite:///:memory:",
@@ -33,7 +33,7 @@ def engine() -> AsyncEngine:
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 async def setup_db(engine: AsyncEngine) -> AsyncIterator[None]:
     async with engine.begin() as conn:
         await conn.run_sync(BaseModel.metadata.create_all)
